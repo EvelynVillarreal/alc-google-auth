@@ -71,12 +71,30 @@ final class AuthController
         $user = User::query()->where('email', $email)->where('is_active', true)->first();
 
         if (!$user) {
-            return $this->responder->json($response, [
-                'user_exists' => false,
-                'email' => $email,
-                'name' => $googlePayload['name'] ?? '',
-                'picture' => $googlePayload['picture'] ?? '',
-            ]);
+            $student = Student::query()
+                ->whereRaw('lower(email) = ?', [$email])
+                ->where('status', 'active')
+                ->first();
+
+            if ($student) {
+                $user = new User();
+                $user->email = $email;
+                $user->name = $student->full_name;
+                $user->role = 'student';
+                $user->branch_id = $student->branch_id;
+                $user->student_id = $student->id;
+                $user->avatar_url = $googlePayload['picture'] ?? null;
+                $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
+                $user->is_active = true;
+                $user->save();
+            } else {
+                return $this->responder->json($response, [
+                    'user_exists' => false,
+                    'email' => $email,
+                    'name' => $googlePayload['name'] ?? '',
+                    'picture' => $googlePayload['picture'] ?? '',
+                ]);
+            }
         }
 
         $user->last_login_at = date('Y-m-d H:i:s');
