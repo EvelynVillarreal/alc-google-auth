@@ -494,6 +494,9 @@ class PublicPagesController {
       if (nameInput) { nameInput.value = googleName; nameInput.readOnly = true; nameInput.classList.add("readonly-field"); }
       if (emailInput) { emailInput.value = googleEmail; emailInput.readOnly = true; emailInput.classList.add("readonly-field"); }
 
+      const hiddenField = document.getElementById("enrollGoogleCredential");
+      if (hiddenField) hiddenField.value = googleCredential;
+
       const heroDesc = document.getElementById("enrollmentHeroText");
       if (heroDesc) heroDesc.textContent = "Complete your information to create your student account.";
       const sidebarText = document.getElementById("enrollmentSidebarText");
@@ -530,15 +533,21 @@ class PublicPagesController {
         return;
       }
 
+      const credential = document.getElementById("enrollGoogleCredential")?.value
+        || window.sessionStorage.getItem("alc-google-credential");
+
       try {
-        if (isGoogleFlow && googleCredential) {
+        if (credential) {
           const payload = await this.apiClient.request("/api/auth/google/enroll", {
             method: "POST",
             auth: false,
-            body: { ...data, id_token: googleCredential }
+            body: { ...data, id_token: credential }
           });
 
           window.sessionStorage.removeItem("alc-google-credential");
+          if (document.getElementById("enrollGoogleCredential")) {
+            document.getElementById("enrollGoogleCredential").value = "";
+          }
           this.sessionStore.set(payload);
           Dom.showMessage("enrollmentMessage", "Account created. Redirecting...");
           window.setTimeout(() => { window.location.replace("dashboard.html"); }, 1000);
