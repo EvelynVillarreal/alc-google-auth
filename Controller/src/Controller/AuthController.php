@@ -156,12 +156,12 @@ final class AuthController
         }
 
         $fullName = trim((string) ($data['full_name'] ?? $googlePayload['name'] ?? ''));
-        $phone = trim((string) ($data['phone'] ?? ''));
-        $nationalId = trim((string) ($data['national_id'] ?? ''));
+        $phone = preg_replace('/[^\d+]+/', '', (string) ($data['phone'] ?? ''));
+        $nationalId = preg_replace('/\D+/', '', (string) ($data['national_id'] ?? ''));
         $branchId = isset($data['branch_id']) ? (int) $data['branch_id'] : null;
-        $level = in_array(($data['level'] ?? ''), ['B1', 'B2'], true) ? $data['level'] : 'B1';
+        $level = in_array(($data['level'] ?? ''), ['B1', 'B2'], true) ? strtoupper($data['level']) : 'B1';
         $guardianName = trim((string) ($data['guardian_name'] ?? ''));
-        $guardianPhone = trim((string) ($data['guardian_phone'] ?? ''));
+        $guardianPhone = preg_replace('/[^\d+]+/', '', (string) ($data['guardian_phone'] ?? ''));
         $comments = trim((string) ($data['comments'] ?? ''));
 
         if ($fullName === '' || $phone === '' || $nationalId === '' || $branchId === null) {
@@ -172,6 +172,18 @@ final class AuthController
 
         if (!$branch) {
             return $this->responder->json($response, ['message' => 'Selected branch does not exist.'], 422);
+        }
+
+        if (Student::query()->where('national_id', $nationalId)->exists()) {
+            return $this->responder->json($response, ['message' => 'There is already a student with this national ID.'], 422);
+        }
+
+        if (Student::query()->whereRaw('lower(email) = ?', [$email])->exists()) {
+            return $this->responder->json($response, ['message' => 'There is already a student with this email.'], 422);
+        }
+
+        if (Student::query()->where('phone', $phone)->exists()) {
+            return $this->responder->json($response, ['message' => 'There is already a student with this phone.'], 422);
         }
 
         $student = new Student();
