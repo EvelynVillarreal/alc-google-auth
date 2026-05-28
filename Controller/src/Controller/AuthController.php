@@ -54,56 +54,62 @@ final class AuthController
 
     public function googleLogin(Request $request, Response $response): Response
     {
-        $data = (array) $request->getParsedBody();
-        $idToken = (string) ($data['id_token'] ?? '');
+        try {
+            $data = (array) $request->getParsedBody();
+            $idToken = (string) ($data['id_token'] ?? '');
 
-        if ($idToken === '') {
-            return $this->responder->json($response, ['message' => 'Google ID token is required.'], 422);
-        }
-
-        $googlePayload = $this->verifyGoogleToken($idToken);
-
-        if ($googlePayload === null) {
-            return $this->responder->json($response, ['message' => 'Invalid Google token.'], 401);
-        }
-
-        $email = strtolower(trim((string) $googlePayload['email']));
-        $user = User::query()->where('email', $email)->where('is_active', true)->first();
-
-        if (!$user) {
-            $student = Student::query()
-                ->whereRaw('lower(email) = ?', [$email])
-                ->where('status', 'active')
-                ->first();
-
-            if ($student) {
-                $user = new User();
-                $user->email = $email;
-                $user->name = $student->full_name;
-                $user->role = 'student';
-                $user->branch_id = $student->branch_id;
-                $user->student_id = $student->id;
-                $user->avatar_url = $googlePayload['picture'] ?? null;
-                $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
-                $user->is_active = true;
-                $user->save();
-            } else {
-                return $this->responder->json($response, [
-                    'user_exists' => false,
-                    'email' => $email,
-                    'name' => $googlePayload['name'] ?? '',
-                    'picture' => $googlePayload['picture'] ?? '',
-                ]);
+            if ($idToken === '') {
+                return $this->responder->json($response, ['message' => 'Google ID token is required.'], 422);
             }
+
+            $googlePayload = $this->verifyGoogleToken($idToken);
+
+            if ($googlePayload === null) {
+                return $this->responder->json($response, ['message' => 'Invalid Google token.'], 401);
+            }
+
+            $email = strtolower(trim((string) $googlePayload['email']));
+            $user = User::query()->where('email', $email)->where('is_active', true)->first();
+
+            if (!$user) {
+                $student = Student::query()
+                    ->whereRaw('lower(email) = ?', [$email])
+                    ->where('status', 'active')
+                    ->first();
+
+                if ($student) {
+                    $user = new User();
+                    $user->email = $email;
+                    $user->name = $student->full_name;
+                    $user->role = 'student';
+                    $user->branch_id = $student->branch_id;
+                    $user->student_id = $student->id;
+                    $user->avatar_url = $googlePayload['picture'] ?? null;
+                    $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
+                    $user->is_active = true;
+                    $user->save();
+                } else {
+                    return $this->responder->json($response, [
+                        'user_exists' => false,
+                        'email' => $email,
+                        'name' => $googlePayload['name'] ?? '',
+                        'picture' => $googlePayload['picture'] ?? '',
+                    ]);
+                }
+            }
+
+            $user->last_login_at = date('Y-m-d H:i:s');
+            $user->save();
+
+            return $this->responder->json($response, [
+                'token' => $this->auth->issueToken($user),
+                'user' => $this->auth->publicUser($user),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->responder->json($response, [
+                'message' => 'Server error: ' . $e->getMessage(),
+            ], 500);
         }
-
-        $user->last_login_at = date('Y-m-d H:i:s');
-        $user->save();
-
-        return $this->responder->json($response, [
-            'token' => $this->auth->issueToken($user),
-            'user' => $this->auth->publicUser($user),
-        ]);
     }
 
     public function googleRegister(Request $request, Response $response): Response
@@ -148,94 +154,100 @@ final class AuthController
 
     public function googleEnroll(Request $request, Response $response): Response
     {
-        $data = (array) $request->getParsedBody();
-        $idToken = (string) ($data['id_token'] ?? '');
+        try {
+            $data = (array) $request->getParsedBody();
+            $idToken = (string) ($data['id_token'] ?? '');
 
-        if ($idToken === '') {
-            return $this->responder->json($response, ['message' => 'Google ID token is required.'], 422);
+            if ($idToken === '') {
+                return $this->responder->json($response, ['message' => 'Google ID token is required.'], 422);
+            }
+
+            $googlePayload = $this->verifyGoogleToken($idToken);
+
+            if ($googlePayload === null) {
+                return $this->responder->json($response, ['message' => 'Invalid Google token.'], 401);
+            }
+
+            $email = strtolower(trim((string) ($data['email'] ?? $googlePayload['email'] ?? '')));
+
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $this->responder->json($response, ['message' => 'A valid email is required.'], 422);
+            }
+
+            $existingUser = User::query()->where('email', $email)->first();
+
+            if ($existingUser) {
+                return $this->responder->json($response, ['message' => 'An account with this email already exists.'], 409);
+            }
+
+            $fullName = trim((string) ($data['full_name'] ?? $googlePayload['name'] ?? ''));
+            $phone = preg_replace('/[^\d+]+/', '', (string) ($data['phone'] ?? ''));
+            $nationalId = preg_replace('/\D+/', '', (string) ($data['national_id'] ?? ''));
+            $branchId = isset($data['branch_id']) ? (int) $data['branch_id'] : null;
+            $level = in_array(($data['level'] ?? ''), ['B1', 'B2'], true) ? strtoupper($data['level']) : 'B1';
+            $guardianName = trim((string) ($data['guardian_name'] ?? ''));
+            $guardianPhone = preg_replace('/[^\d+]+/', '', (string) ($data['guardian_phone'] ?? ''));
+            $comments = trim((string) ($data['comments'] ?? ''));
+
+            if ($fullName === '' || $phone === '' || $nationalId === '' || $branchId === null) {
+                return $this->responder->json($response, ['message' => 'Name, phone, national ID, and branch are required.'], 422);
+            }
+
+            $branch = Branch::query()->find($branchId);
+
+            if (!$branch) {
+                return $this->responder->json($response, ['message' => 'Selected branch does not exist.'], 422);
+            }
+
+            if (Student::query()->where('national_id', $nationalId)->exists()) {
+                return $this->responder->json($response, ['message' => 'There is already a student with this national ID.'], 422);
+            }
+
+            if (Student::query()->whereRaw('lower(email) = ?', [$email])->exists()) {
+                return $this->responder->json($response, ['message' => 'There is already a student with this email.'], 422);
+            }
+
+            if (Student::query()->where('phone', $phone)->exists()) {
+                return $this->responder->json($response, ['message' => 'There is already a student with this phone.'], 422);
+            }
+
+            $student = new Student();
+            $student->branch_id = $branchId;
+            $student->national_id = $nationalId;
+            $student->full_name = $fullName;
+            $student->email = $email;
+            $student->phone = $phone;
+            $student->level = $level;
+            $student->scholarship_percent = 0;
+            $student->guardian_name = $guardianName;
+            $student->guardian_phone = $guardianPhone;
+            $student->comments = $comments;
+            $student->status = 'active';
+            $student->save();
+
+            $user = new User();
+            $user->email = $email;
+            $user->name = $fullName;
+            $user->role = 'student';
+            $user->branch_id = $branchId;
+            $user->student_id = $student->id;
+            $user->avatar_url = $googlePayload['picture'] ?? null;
+            $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
+            $user->is_active = true;
+            $user->save();
+
+            $user->last_login_at = date('Y-m-d H:i:s');
+            $user->save();
+
+            return $this->responder->json($response, [
+                'token' => $this->auth->issueToken($user),
+                'user' => $this->auth->publicUser($user),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->responder->json($response, [
+                'message' => 'Server error: ' . $e->getMessage(),
+            ], 500);
         }
-
-        $googlePayload = $this->verifyGoogleToken($idToken);
-
-        if ($googlePayload === null) {
-            return $this->responder->json($response, ['message' => 'Invalid Google token.'], 401);
-        }
-
-        $email = strtolower(trim((string) ($data['email'] ?? $googlePayload['email'] ?? '')));
-
-        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return $this->responder->json($response, ['message' => 'A valid email is required.'], 422);
-        }
-
-        $existingUser = User::query()->where('email', $email)->first();
-
-        if ($existingUser) {
-            return $this->responder->json($response, ['message' => 'An account with this email already exists.'], 409);
-        }
-
-        $fullName = trim((string) ($data['full_name'] ?? $googlePayload['name'] ?? ''));
-        $phone = preg_replace('/[^\d+]+/', '', (string) ($data['phone'] ?? ''));
-        $nationalId = preg_replace('/\D+/', '', (string) ($data['national_id'] ?? ''));
-        $branchId = isset($data['branch_id']) ? (int) $data['branch_id'] : null;
-        $level = in_array(($data['level'] ?? ''), ['B1', 'B2'], true) ? strtoupper($data['level']) : 'B1';
-        $guardianName = trim((string) ($data['guardian_name'] ?? ''));
-        $guardianPhone = preg_replace('/[^\d+]+/', '', (string) ($data['guardian_phone'] ?? ''));
-        $comments = trim((string) ($data['comments'] ?? ''));
-
-        if ($fullName === '' || $phone === '' || $nationalId === '' || $branchId === null) {
-            return $this->responder->json($response, ['message' => 'Name, phone, national ID, and branch are required.'], 422);
-        }
-
-        $branch = Branch::query()->find($branchId);
-
-        if (!$branch) {
-            return $this->responder->json($response, ['message' => 'Selected branch does not exist.'], 422);
-        }
-
-        if (Student::query()->where('national_id', $nationalId)->exists()) {
-            return $this->responder->json($response, ['message' => 'There is already a student with this national ID.'], 422);
-        }
-
-        if (Student::query()->whereRaw('lower(email) = ?', [$email])->exists()) {
-            return $this->responder->json($response, ['message' => 'There is already a student with this email.'], 422);
-        }
-
-        if (Student::query()->where('phone', $phone)->exists()) {
-            return $this->responder->json($response, ['message' => 'There is already a student with this phone.'], 422);
-        }
-
-        $student = new Student();
-        $student->branch_id = $branchId;
-        $student->national_id = $nationalId;
-        $student->full_name = $fullName;
-        $student->email = $email;
-        $student->phone = $phone;
-        $student->level = $level;
-        $student->scholarship_percent = 0;
-        $student->guardian_name = $guardianName;
-        $student->guardian_phone = $guardianPhone;
-        $student->comments = $comments;
-        $student->status = 'active';
-        $student->save();
-
-        $user = new User();
-        $user->email = $email;
-        $user->name = $fullName;
-        $user->role = 'student';
-        $user->branch_id = $branchId;
-        $user->student_id = $student->id;
-        $user->avatar_url = $googlePayload['picture'] ?? null;
-        $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
-        $user->is_active = true;
-        $user->save();
-
-        $user->last_login_at = date('Y-m-d H:i:s');
-        $user->save();
-
-        return $this->responder->json($response, [
-            'token' => $this->auth->issueToken($user),
-            'user' => $this->auth->publicUser($user),
-        ]);
     }
 
     public function me(Request $request, Response $response): Response
