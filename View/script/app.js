@@ -449,6 +449,7 @@ class PublicPagesController {
     this.sessionStore = sessionStore;
     this.branchStore = branchStore;
     this.pendingCredential = null;
+    this.pendingGoogleData = null;
   }
 
   init() {
@@ -481,6 +482,26 @@ class PublicPagesController {
     if (params.get("style")) Dom.setValue("enrollStyle", params.get("style"));
     if (params.get("offer")) Dom.setValue("enrollOffer", params.get("offer"));
 
+    const isGoogleFlow = params.get("google") === "1";
+    const googleCredential = window.sessionStorage.getItem("alc-google-credential");
+
+    if (isGoogleFlow && googleCredential) {
+      const googleName = params.get("name") || "";
+      const googleEmail = params.get("email") || "";
+
+      const nameInput = document.getElementById("enrollName");
+      const emailInput = document.getElementById("enrollEmail");
+      if (nameInput) { nameInput.value = googleName; nameInput.readOnly = true; nameInput.classList.add("readonly-field"); }
+      if (emailInput) { emailInput.value = googleEmail; emailInput.readOnly = true; emailInput.classList.add("readonly-field"); }
+
+      const heroDesc = document.getElementById("enrollmentHeroText");
+      if (heroDesc) heroDesc.textContent = "Complete your information to create your student account.";
+      const sidebarText = document.getElementById("enrollmentSidebarText");
+      if (sidebarText) sidebarText.textContent = "You signed in with Google. Fill in the remaining details to create your student account.";
+      const sidebarList = document.getElementById("enrollmentSidebarList");
+      if (sidebarList) sidebarList.innerHTML = "<span>Google account verified</span><span>Access immediately after registering</span>";
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
 
@@ -510,15 +531,28 @@ class PublicPagesController {
       }
 
       try {
-        await this.apiClient.request("/api/enrollments", {
-          method: "POST",
-          auth: false,
-          body: data
-        });
+        if (isGoogleFlow && googleCredential) {
+          const payload = await this.apiClient.request("/api/auth/google/enroll", {
+            method: "POST",
+            auth: false,
+            body: { ...data, id_token: googleCredential }
+          });
 
-        form.reset();
-        this.branchStore.fillSelects();
-        Dom.showMessage("enrollmentMessage", "Request submitted. The directors will contact the applicant.");
+          window.sessionStorage.removeItem("alc-google-credential");
+          this.sessionStore.set(payload);
+          Dom.showMessage("enrollmentMessage", "Account created. Redirecting...");
+          window.setTimeout(() => { window.location.replace("dashboard.html"); }, 1000);
+        } else {
+          await this.apiClient.request("/api/enrollments", {
+            method: "POST",
+            auth: false,
+            body: data
+          });
+
+          form.reset();
+          this.branchStore.fillSelects();
+          Dom.showMessage("enrollmentMessage", "Request submitted. The directors will contact the applicant.");
+        }
       } catch (error) {
         Dom.showMessage("enrollmentMessage", error.message);
       }
@@ -598,25 +632,23 @@ class PublicPagesController {
     if (createModal) {
       const confirmBtn = document.getElementById("createAccountConfirm");
       if (confirmBtn) {
-        confirmBtn.addEventListener("click", async () => {
+        confirmBtn.addEventListener("click", () => {
           if (!this.pendingCredential) return;
 
           const modal = bootstrap.Modal.getInstance(createModal);
           if (modal) modal.hide();
 
-          try {
-            const payload = await this.apiClient.request("/api/auth/google/register", {
-              method: "POST",
-              auth: false,
-              body: { id_token: this.pendingCredential }
-            });
+          window.sessionStorage.setItem("alc-google-credential", this.pendingCredential);
+          const data = this.pendingGoogleData || { name: "", email: "" };
+          this.pendingCredential = null;
+          this.pendingGoogleData = null;
 
-            this.pendingCredential = null;
-            this.sessionStore.set(payload);
-            window.location.replace("dashboard.html");
-          } catch (error) {
-            Dom.showMessage("googleMessage", error.message);
-          }
+          const params = new URLSearchParams({
+            google: "1",
+            name: data.name,
+            email: data.email
+          });
+          window.location.href = `enrollment.html?${params.toString()}`;
         });
       }
     }
@@ -656,6 +688,7 @@ class PublicPagesController {
 
       if (payload.user_exists === false) {
         this.pendingCredential = credential;
+        this.pendingGoogleData = { name: payload.name, email: payload.email };
         const msgEl = document.getElementById("createAccountMessage");
         if (msgEl) {
           msgEl.textContent = `"${payload.email}" is not registered in the system.`;

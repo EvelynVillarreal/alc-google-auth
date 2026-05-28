@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Model\AttendanceRecord;
+use App\Model\Branch;
 use App\Model\Student;
 use App\Model\User;
 use App\Service\AttendanceSummaryService;
@@ -113,6 +114,86 @@ final class AuthController
         $user->email = $email;
         $user->name = trim((string) ($googlePayload['name'] ?? explode('@', $email)[0]));
         $user->role = 'student';
+        $user->avatar_url = $googlePayload['picture'] ?? null;
+        $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
+        $user->is_active = true;
+        $user->save();
+
+        $user->last_login_at = date('Y-m-d H:i:s');
+        $user->save();
+
+        return $this->responder->json($response, [
+            'token' => $this->auth->issueToken($user),
+            'user' => $this->auth->publicUser($user),
+        ]);
+    }
+
+    public function googleEnroll(Request $request, Response $response): Response
+    {
+        $data = (array) $request->getParsedBody();
+        $idToken = (string) ($data['id_token'] ?? '');
+
+        if ($idToken === '') {
+            return $this->responder->json($response, ['message' => 'Google ID token is required.'], 422);
+        }
+
+        $googlePayload = $this->verifyGoogleToken($idToken);
+
+        if ($googlePayload === null) {
+            return $this->responder->json($response, ['message' => 'Invalid Google token.'], 401);
+        }
+
+        $email = strtolower(trim((string) ($data['email'] ?? $googlePayload['email'] ?? '')));
+
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $this->responder->json($response, ['message' => 'A valid email is required.'], 422);
+        }
+
+        $existingUser = User::query()->where('email', $email)->first();
+
+        if ($existingUser) {
+            return $this->responder->json($response, ['message' => 'An account with this email already exists.'], 409);
+        }
+
+        $fullName = trim((string) ($data['full_name'] ?? $googlePayload['name'] ?? ''));
+        $phone = trim((string) ($data['phone'] ?? ''));
+        $nationalId = trim((string) ($data['national_id'] ?? ''));
+        $branchId = isset($data['branch_id']) ? (int) $data['branch_id'] : null;
+        $level = in_array(($data['level'] ?? ''), ['B1', 'B2'], true) ? $data['level'] : 'B1';
+        $guardianName = trim((string) ($data['guardian_name'] ?? ''));
+        $guardianPhone = trim((string) ($data['guardian_phone'] ?? ''));
+        $comments = trim((string) ($data['comments'] ?? ''));
+
+        if ($fullName === '' || $phone === '' || $nationalId === '' || $branchId === null) {
+            return $this->responder->json($response, ['message' => 'Name, phone, national ID, and branch are required.'], 422);
+        }
+
+        $branch = Branch::query()->find($branchId);
+
+        if (!$branch) {
+            return $this->responder->json($response, ['message' => 'Selected branch does not exist.'], 422);
+        }
+
+        $student = new Student();
+        $student->branch_id = $branchId;
+        $student->national_id = $nationalId;
+        $student->full_name = $fullName;
+        $student->email = $email;
+        $student->phone = $phone;
+        $student->level = $level;
+        $student->scholarship_percent = 0;
+        $student->guardian_name = $guardianName;
+        $student->guardian_phone = $guardianPhone;
+        $student->comments = $comments;
+        $student->status = 'active';
+        $student->save();
+
+        $user = new User();
+        $user->email = $email;
+        $user->name = $fullName;
+        $user->role = 'student';
+        $user->branch_id = $branchId;
+        $user->student_id = $student->id;
         $user->avatar_url = $googlePayload['picture'] ?? null;
         $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
         $user->is_active = true;
