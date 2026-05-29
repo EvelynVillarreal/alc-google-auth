@@ -16,15 +16,16 @@ With OAuth, both security and convenience improve because users do not have to e
 4. Name your OAuth 2.0 client and click Create
 
 ### Load the Google Platform Library
-<script src="https://apis.google.com/js/platform.js" async defer></script>
+`<script src="https://apis.google.com/js/platform.js" async defer></script>`
 
 ### Specify your app's client ID
-<meta name="google-signin-client_id" content="YOUR_CLIENT_ID.apps.googleusercontent.com">
+`<meta name="google-signin-client_id" content="YOUR_CLIENT_ID.apps.googleusercontent.com">`
 
 ### Add a Google Sign-In button
-<div class="g-signin2" data-onsuccess="onSignIn"></div>
+`<div class="g-signin2" data-onsuccess="onSignIn"></div>`
 
 ### Get profile information
+```
 function onSignIn(googleUser) {
   var profile = googleUser.getBasicProfile();
   console.log('ID: ' + profile.getId()); // Do not send to your backend! Use an ID token instead.
@@ -32,3 +33,4 @@ function onSignIn(googleUser) {
   console.log('Image URL: ' + profile.getImageUrl());
   console.log('Email: ' + profile.getEmail()); // This is null if the 'email' scope is not present.
 }
+```
