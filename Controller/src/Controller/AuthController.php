@@ -84,12 +84,11 @@ final class AuthController
                     $user->role = 'student';
                     $user->branch_id = $student->branch_id;
                     $user->student_id = $student->id;
-                    $user->avatar_url = $googlePayload['picture'] ?? null;
-                    $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
-                    $user->is_active = true;
-                    $user->save();
-                } else {
-                    return $this->responder->json($response, [
+                $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
+                $user->is_active = true;
+                $user->save();
+            } else {
+                return $this->responder->json($response, [
                         'user_exists' => false,
                         'email' => $email,
                         'name' => $googlePayload['name'] ?? '',
@@ -138,7 +137,6 @@ final class AuthController
         $user->email = $email;
         $user->name = trim((string) ($googlePayload['name'] ?? explode('@', $email)[0]));
         $user->role = 'student';
-        $user->avatar_url = $googlePayload['picture'] ?? null;
         $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
         $user->is_active = true;
         $user->save();
@@ -231,7 +229,6 @@ final class AuthController
             $user->role = 'student';
             $user->branch_id = $branchId;
             $user->student_id = $student->id;
-            $user->avatar_url = $googlePayload['picture'] ?? null;
             $user->password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
             $user->is_active = true;
             $user->save();
